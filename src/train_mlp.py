@@ -46,20 +46,20 @@ def evaluate(split, batches=EVAL_BATCHES):
         total += loss_fn(model(x), y).item()
     model.train()
     return total / batches / LN2
-
-n_params = sum(p.numel() for p in model.parameters())
-print(f"params: {n_params:,}  (n_ctx={N_CTX} d_emb={D_EMB} d_hidden={D_HIDDEN})")
-print(f"before training, val bpc = {evaluate('val'):.4f}")
-rng = np.random.default_rng(1337)
-best = float('inf')
-for step in range(1, STEPS + 1):
-    x,y = get_batch("train", BATCH, BLOCK, rng)
-    loss = loss_fn(model(x), y)
-    opt.zero_grad()
-    loss.backward()
-    opt.step()
-    if step % EVAL_EVERY == 0:
-        val = evaluate("val")
-        best = min(best, val)
-        print(f"step {step}: loss = {loss:.4f}, best = {best:.4f}")
-print(f"\nbest val bpc: {best:.4f}  ({n_params:,} params)")
+if __name__ == "__main__":
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"params: {n_params:,}  (n_ctx={N_CTX} d_emb={D_EMB} d_hidden={D_HIDDEN})")
+    print(f"before training, val bpc = {evaluate('val'):.4f}")
+    rng = np.random.default_rng(1337)
+    best = float('inf')
+    for step in range(1, STEPS + 1):
+        x,y = get_batch("train", BATCH, BLOCK, rng)
+        loss = loss_fn(model(x), y)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+        if step % EVAL_EVERY == 0:
+            val = evaluate("val")
+            best = min(best, val)
+            print(f"step {step}: loss = {loss:.4f}, best = {best:.4f}")
+    print(f"\nbest val bpc: {best:.4f}  ({n_params:,} params)")
