@@ -46,7 +46,7 @@ def evaluate(split, batches=EVAL_BATCHES):
         total += loss_fn(model(x), y).item()
     model.train()
     return total / batches / LN2
-if __name__ == "__main__":
+if __name__ == "__main__":  
     n_params = sum(p.numel() for p in model.parameters())
     print(f"params: {n_params:,}  (n_ctx={N_CTX} d_emb={D_EMB} d_hidden={D_HIDDEN})")
     print(f"before training, val bpc = {evaluate('val'):.4f}")
