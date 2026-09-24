@@ -30,9 +30,9 @@ def safe_run(arch, tcfg):
             "val_bpc": None,
             "failed" : str(e)
         }
-    if not math.isinf(result["val_bpc"]):
+    if not math.isfinite(result["val_bpc"]):
         result["val_bpc"], result["failed"] = None, "non-finite loss"
-        return result
+    return result
 
 
 LRS = [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]
@@ -57,6 +57,22 @@ def check_interior(results):
         print(f"WARNING: best lr {best_lr} is at the grid edge — extend the grid")
     return best_lr
 
+def check_ranking_stability(arch, best_lr, lrs=LRS, short=SWEEP_STEPS, long=None):
+    long = long or short * 5
+    pair = sorted(lrs, key=lambda x: abs(math.log10(x) - math.log10(best_lr)))[:2]
+    print(f"\nstability at {long} steps: {pair[0]:g} vs {pair[1]:g}")
+
+    out = {}
+    for lr in pair:
+        r = safe_run(arch, TrainConfig(lr=lr, steps=long, seed=1337))
+        append_result(r)
+        out[lr] = r["val_bpc"]
+        print(f"  lr={lr:<8g} val bpc {out[lr]}")
+
+    if all(v is not None for v in out.values()):
+        held = out[pair[0]] <= out[pair[1]]
+        print(f"  short-run winner {'held' if held else 'DID NOT HOLD'}")
+    return out
 
 
 if __name__ == "__main__":
@@ -64,5 +80,17 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--steps", type=int, default=SWEEP_STEPS)
     p.add_argument("--d-hidden", type=int, default=256)
+    p.add_argument("--stability", action="store_true", default=True)
     a = p.parse_args()
-    lr_sweep(MLPConfig(d_hidden=a.d_hidden), steps=a.steps)
+    arch = MLPConfig(d_hidden=a.d_hidden)
+    lr_sweep(arch, steps=a.steps)
+    results = [
+        r
+        for r in load_results()
+        if r["arch"] == asdict(arch)
+        and r["train"]["steps"] == a.steps
+    ]
+    best = check_interior(results)
+    print("best lr:", best)
+    if a.stability and best is not None:
+        check_ranking_stability(arch, best, short=a.steps)
