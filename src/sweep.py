@@ -71,8 +71,12 @@ def check_ranking_stability(arch, best_lr, lrs=LRS, short=SWEEP_STEPS, long=None
 
     if all(v is not None for v in out.values()):
         held = out[pair[0]] <= out[pair[1]]
-        print(f"  short-run winner {'held' if held else 'DID NOT HOLD'}")
+        print(f"short-run winner {'held' if held else 'DID NOT HOLD'}")
     return out
+
+def runs_for(arch, steps, path=RESULTS):
+    return [r for r in load_results(path)
+            if r["arch"] == asdict(arch) and r["train"]["steps"] == steps]
 
 
 if __name__ == "__main__":
