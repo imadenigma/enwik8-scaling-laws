@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from data import get_batch
-from flops import EmbeddingOnlyConfig, MLPConfig, flops_per_step
+from flops import EmbeddingOnlyConfig, MLPConfig, flops_per_step, RecurrentConfig
 from models import build
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -23,6 +23,10 @@ class TrainConfig:
     seed: int = 1337
     eval_every: int = 250
     eval_batches: int = 50
+    clip: float = 1.0
+
+
+
 
 def loss_fn(model, logits, y):
     y = y[:, model.n_drop:]
@@ -58,6 +62,8 @@ def run(arch, tcfg=TrainConfig(), verbose=True):
         loss = loss_fn(model, model(x), y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
+        if tcfg.clip:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), tcfg.clip)
         opt.step()
 
         if step % tcfg.eval_every == 0:
@@ -94,10 +100,13 @@ if __name__ == "__main__":
     ARCHS = {
         "bigram": EmbeddingOnlyConfig(),
         "mlp": MLPConfig(),
+        "rnn": RecurrentConfig(cell="rnn", name="rnn"),
+        "gru": RecurrentConfig(cell="gru", name="gru"),
+        "lstm": RecurrentConfig(cell="lstm", name="lstm"),
     }
 
     p = argparse.ArgumentParser()
-    p.add_argument("arch", nargs="?", default="mlp", choices=ARCHS)
+    p.add_argument("arch", nargs="?", default="lstm", choices=ARCHS)
     p.add_argument("--lr", type=float, default=TrainConfig.lr)
     p.add_argument("--steps", type=int, default=TrainConfig.steps)
     p.add_argument("--seed", type=int, default=TrainConfig.seed)

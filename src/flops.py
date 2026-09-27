@@ -64,6 +64,46 @@ class EmbeddingOnlyConfig:
     def total_params(self) -> int:
         return self.vocab * self.vocab
 
+@dataclass(frozen=True)
+class RecurrentConfig:
+    vocab: int = 205
+    cell: str = "lstm"
+    d_emb: int = 32
+    d_hidden: int = 256
+    batch: int = 64
+    block: int = 128
+    name: str = "lstm"
+
+    @property
+    def gates(self):
+        return {
+            "rnn": 1,
+            "gru": 3,
+            "lstm": 4
+        }[self.cell]
+
+    @property
+    def positions_per_step(self):
+        return self.batch * self.block
+
+    @property
+    def embedding_params(self):
+        return self.d_emb * self.vocab
+
+
+    @property
+    def weight_params(self):
+        g = self.gates
+        return self.d_emb * self.d_hidden * g + self.d_hidden * g * self.d_hidden + self.d_hidden * self.vocab
+
+    @property
+    def bias_params(self):
+        return self.gates *  self.d_hidden + self.vocab
+
+    @property
+    def total_params(self):
+        return self.weight_params + self.bias_params + self.embedding_params
+
 def mlp_flops(config: MLPConfig, training = True):
     p = config.positions_per_step
     parts = {
@@ -113,6 +153,19 @@ def measure_with_torch(cfg: MLPConfig) -> int:
         )
         loss.backward()
     return counter.get_total_flops()
+
+def recurrent_flops(config: RecurrentConfig, training=True):
+    p, g = config.positions_per_step, config.gates
+    parts = {
+        "embedding": 0,
+        "x2h" : linear_flops(p, config.d_emb,g * config.d_hidden, training),
+        "h2h": linear_flops(p, config.d_hidden, g * config.d_hidden, training),
+        "head": linear_flops(p, config.d_hidden, config.vocab, training),
+    }
+    parts["total"] = sum(parts.values())
+    return parts
+
+FLOP_FNS[RecurrentConfig] = recurrent_flops
 
 if __name__ == "__main__":
     cfg = MLPConfig()
