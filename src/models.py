@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import math
 
-from flops import EmbeddingOnlyConfig, MLPConfig, RecurrentConfig
+from src.flops import EmbeddingOnlyConfig, MLPConfig, RecurrentConfig
 
 
 class Bigram(nn.Module):
@@ -92,6 +92,26 @@ class GRUCell(nn.Module):
         n = torch.tanh(xn + r * hn)
         h = (1 - z) * n + z * h
         return h, h
+
+class CausalSelfAttention(nn.Module):
+    def __init__(self, d_model, n_head):
+        super().__init__()
+        assert d_model % n_head == 0
+        self.n_head = n_head
+        self.d_head = d_model // n_head
+        self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
+        self.proj = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x):
+        B, T, d = x.shape
+        q, k, v = self.qkv(x).chunk(3, dim=-1)
+        q, k , v = (t.view(B, T, self.n_head, self.d_head).transpose(1, 2) for t in (q, k, v))
+        att = (q @ k.transpose(-2, -1)) / math.sqrt(self.d_head)
+        mask = torch.ones(T, T, dtype=torch.bool, device=x.device).tril()
+        att = att.masked_fill(~mask, float('-inf')).softmax(dim=-1)
+        y = att @ v
+        return self.proj(y.transpose(1, 2).reshape(B, T, d))
+
 
 
 
