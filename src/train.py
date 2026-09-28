@@ -15,6 +15,7 @@ from models import build
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results" / "runs.jsonl"
 LN2 = math.log(2)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 @dataclass(frozen=True)
 class TrainConfig:
@@ -39,26 +40,26 @@ def evaluate(model, arch, tfcg, split="val"):
     model.eval()
     total = 0.0
     for _ in range(tfcg.eval_batches):
-        x, y = get_batch(split, arch.batch, arch.block, rng)
+        x, y = get_batch(split, arch.batch, arch.block, rng, DEVICE)
         total += loss_fn(model, model(x), y).item()
     model.train()
     return total / tfcg.eval_batches / LN2
 
 def run(arch, tcfg=TrainConfig(), verbose=True):
     torch.manual_seed(tcfg.seed)
-    model = build(arch)
+    model = build(arch).to(DEVICE)
     per_step = flops_per_step(arch)
     opt = torch.optim.Adam(model.parameters(), lr=tcfg.lr)
     rng = np.random.default_rng(tcfg.seed)
 
     if verbose:
         print(f"{arch.name}: {arch.total_params:,} params, "
-              f"{per_step:.3e} FLOPs/step, lr={tcfg.lr}, seed={tcfg.seed}")
+              f"{per_step:.3e} FLOPs/step, lr={tcfg.lr}, seed={tcfg.seed}, device={DEVICE}")
         print(f"  step 0  val bpc {evaluate(model, arch, tcfg):.4f}")
 
     curve = []
     for step in range(1, tcfg.steps + 1):
-        x, y = get_batch("train", arch.batch, arch.block, rng)
+        x, y = get_batch("train", arch.batch, arch.block, rng, DEVICE)
         loss = loss_fn(model, model(x), y)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -72,15 +73,15 @@ def run(arch, tcfg=TrainConfig(), verbose=True):
             if verbose:
                 print(f"  step {step:5d}  train bpc {loss.item()/LN2:.4f}  "
                       f"val bpc {val:.4f}")
-
+    finite = [c[2] for c in curve if math.isfinite(c[2])]
     return {
         "arch_type": type(arch).__name__,
         "arch": asdict(arch),
         "train": asdict(tcfg),
-        "val_bpc": min(c[2] for c in curve),
-        "final_bpc": curve[-1][2],
+        "val_bpc": min(finite) if finite else None,
+        "final_bpc": curve[-1][2] if curve else None,
         "flops": tcfg.steps * per_step,
-        "weight_params": arch.weight_param,
+        "weight_params": arch.weight_params,
         "total_params": arch.total_params,
         "curve": curve,
     }
@@ -112,10 +113,25 @@ if __name__ == "__main__":
     p.add_argument("--seed", type=int, default=TrainConfig.seed)
     p.add_argument("--no-save", action="store_true")
     a = p.parse_args()
+    
+    result = run(ARCHS["lstm"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
+    if not a.no_save:
+        append_result(result)
+        print(f"appended to {RESULTS}")
+    result = run(ARCHS["gru"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
+    if not a.no_save:
+        append_result(result)
+        print(f"appended to {RESULTS}")
+    result = run(ARCHS["rnn"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
+    if not a.no_save:
+        append_result(result)
+        print(f"appended to {RESULTS}")
 
-    result = run(ARCHS[a.arch], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
+    val = result["val_bpc"]
     print(
-        f"\nbest val bpc {result['val_bpc']:.4f}  "
+        f"\nbest val bpc {val:.4f}  "
+        if val is not None
+        else "\nno eval fired  "
         f"({result['flops']:.3e} FLOPs, {result['total_params']:,} params)"
     )
 

@@ -2,7 +2,9 @@ import json
 import math
 from dataclasses import asdict
 
-from flops import MLPConfig
+import torch
+
+from flops import MLPConfig, RecurrentConfig
 from train import RESULTS, load_results, run, TrainConfig, append_result
 
 
@@ -21,7 +23,7 @@ def key_of(arch, tcfg):
 
 def safe_run(arch, tcfg):
     try:
-        result = run(arch, tcfg, verbose=False)
+        result = run(arch, tcfg, verbose=True)
     except (ValueError, RuntimeError)  as e:
         return {
             "arch_type" : type(arch).__name__,
@@ -41,6 +43,7 @@ SWEEP_STEPS = 1000
 def lr_sweep(arch, lrs=LRS, steps=SWEEP_STEPS, seed=1337):
     done = done_keys()
     for lr in lrs:
+        print(f"running lr = {lr:<8}")
         tfcg = TrainConfig(lr, steps, seed=seed)
         if key_of(arch, tfcg) in done:
             print(f"skip lr = {lr:<8}")
@@ -81,20 +84,27 @@ def runs_for(arch, steps, path=RESULTS):
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--steps", type=int, default=SWEEP_STEPS)
-    p.add_argument("--d-hidden", type=int, default=256)
-    p.add_argument("--stability", action="store_true", default=True)
-    a = p.parse_args()
-    arch = MLPConfig(d_hidden=a.d_hidden)
-    lr_sweep(arch, steps=a.steps)
-    results = [
-        r
-        for r in load_results()
-        if r["arch"] == asdict(arch)
-        and r["train"]["steps"] == a.steps
-    ]
-    best = check_interior(results)
-    print("best lr:", best)
-    if a.stability and best is not None:
-        check_ranking_stability(arch, best, short=a.steps)
+    # p = argparse.ArgumentParser()
+    # p.add_argument("--steps", type=int, default=SWEEP_STEPS)
+    # p.add_argument("--d-hidden", type=int, default=256)
+    # p.add_argument("--stability", action="store_true", default=True)
+    # a = p.parse_args()
+    # arch = MLPConfig(d_hidden=a.d_hidden)
+    # lr_sweep(arch, steps=a.steps)
+    # results = [
+    #     r
+    #     for r in load_results()
+    #     if r["arch"] == asdict(arch)
+    #     and r["train"]["steps"] == a.steps
+    # ]
+    #
+    print(torch.device.__name__, torch.cuda.is_available())
+    for cell in ("rnn", "gru", "lstm"):
+        print(f"cell={cell}")
+        arch = RecurrentConfig(cell=cell, name=cell)
+        lr_sweep(arch, steps=1000)
+        print(cell, "best lr:", check_interior(runs_for(arch, 1000)))
+    # best = check_interior(results)
+    # print("best lr:", best)
+    # if a.stability and best is not None:
+    #     check_ranking_stability(arch, best, short=a.steps)

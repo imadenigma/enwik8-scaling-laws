@@ -38,8 +38,8 @@ class RNNCell(nn.Module):
         self.x2h = nn.Linear(d_in, d_hidden)
         self.h2h = nn.Linear(d_hidden, d_hidden)
     def forward(self, x, h):
-        h = nn.Tanh(self.x2h(x) + self.h2h(h))
-        return h
+        h = torch.tanh(self.x2h(x) + self.h2h(h))
+        return h, h
 
 class LSTMCell(nn.Module):
     def __init__(self, d_in, d_hidden):
@@ -80,17 +80,19 @@ class Recurrent(nn.Module):
 
 class GRUCell(nn.Module):
     def __init__(self, d_in, d_hidden):
+        super().__init__()
         self.x2h = nn.Linear(d_in, 3 * d_hidden, False)
         self.h2h = nn.Linear(d_hidden, 3 * d_hidden)
 
     def forward(self, x, h):
         xr, xz, xn = self.x2h(x).chunk(3, dim=-1)
-        hr, hz, hn = self.h2h(x).chunk(3, dim=-1)
+        hr, hz, hn = self.h2h(h).chunk(3, dim=-1)
         r = torch.sigmoid(xr + hr)
         z = torch.sigmoid(xz + hz)
         n = torch.tanh(xn + r * hn)
         h = (1 - z) * n + z * h
         return h, h
+
 
 
 BUILDERS = {
