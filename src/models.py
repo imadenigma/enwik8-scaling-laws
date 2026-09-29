@@ -3,7 +3,8 @@ import torch
 from torch import nn
 import math
 
-from src.flops import EmbeddingOnlyConfig, MLPConfig, RecurrentConfig
+from flops import EmbeddingOnlyConfig, MLPConfig, RecurrentConfig
+from flops import TransformerConfig
 
 
 class Bigram(nn.Module):
@@ -106,19 +107,73 @@ class CausalSelfAttention(nn.Module):
         B, T, d = x.shape
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q, k , v = (t.view(B, T, self.n_head, self.d_head).transpose(1, 2) for t in (q, k, v))
+        cos, sin = rope_cache(T, self.d_head, x.device)
+        q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         att = (q @ k.transpose(-2, -1)) / math.sqrt(self.d_head)
         mask = torch.ones(T, T, dtype=torch.bool, device=x.device).tril()
         att = att.masked_fill(~mask, float('-inf')).softmax(dim=-1)
         y = att @ v
         return self.proj(y.transpose(1, 2).reshape(B, T, d))
 
+class RMSNorm(nn.Module):
+    def __init__(self, d_model, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.g = nn.Parameter(torch.ones(d_model))
+
+    def forward(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.g
+
+class Block(nn.Module):
+    def __init__(self, d_model, n_head, mlp_mult = 4):
+        super().__init__()
+        self.n1, self.n2 = RMSNorm(d_model), RMSNorm(d_model)
+        self.attn = CausalSelfAttention(d_model, n_head)
+        self.mlp = nn.Sequential(
+            nn.Linear(d_model, d_model * mlp_mult, bias=False),
+            nn.GELU(),
+            nn.Linear(d_model * mlp_mult, d_model, bias=False)
+        )
+
+    def forward(self, x):
+        x = x + self.attn(self.n1(x))
+        x = x + self.mlp(self.n2(x))
+        return x
 
 
+class Transformer(nn.Module):
+    def __init__(self, vocab, n_layer = 4, d_model = 128, n_head = 4, mlp_mult = 4):
+        super().__init__()
+        self.n_drop = 0
+        self.emb = nn.Embedding(vocab, d_model)
+        self.blocks = nn.ModuleList(
+            Block(d_model, n_head, mlp_mult) for _ in range(n_layer)
+        )
+        self.norm = RMSNorm(d_model)
+        self.head = nn.Linear(d_model, vocab, bias=False)
+    def forward(self, x):
+        h = self.emb(x)
+        for b in self.blocks:
+            h = b(h)
+        return self.head(self.norm(h))
+
+def rope_cache(T, d_head, device, base = 10000.0):
+    k = torch.arange(0, d_head, 2, device=device).float()
+    theta = base ** (-k / d_head)
+    pos = torch.arange(T, device=device).float()
+    angle = pos[:, None] * theta[None, :]
+    return angle.cos(), angle.sin()
+
+def apply_rope(x, cos, sin):
+    x1, x2 = x[..., 0::2], x[..., 1::2] #even and odd components
+    out = torch.stack([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
+    return out.flatten(-2)
 
 BUILDERS = {
     EmbeddingOnlyConfig: lambda c: Bigram(c.vocab),
     MLPConfig: lambda c: MLP(c.vocab, c.n_ctx, c.d_emb, c.d_hidden),
     RecurrentConfig: lambda c: Recurrent(c.vocab, CELLS[c.cell], c.d_emb, c.d_hidden),
+    TransformerConfig: lambda c: Transformer(c.vocab, c.n_layer, c.d_model, c.n_head, c.mlp_mult)
 }
 
 CELLS = {

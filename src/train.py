@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from data import get_batch
-from flops import EmbeddingOnlyConfig, MLPConfig, flops_per_step, RecurrentConfig
+from flops import EmbeddingOnlyConfig, MLPConfig, flops_per_step, RecurrentConfig, TransformerConfig
 from models import build
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -104,7 +104,9 @@ if __name__ == "__main__":
         "rnn": RecurrentConfig(cell="rnn", name="rnn"),
         "gru": RecurrentConfig(cell="gru", name="gru"),
         "lstm": RecurrentConfig(cell="lstm", name="lstm"),
+        "transformer": TransformerConfig()
     }
+
 
     p = argparse.ArgumentParser()
     p.add_argument("arch", nargs="?", default="lstm", choices=ARCHS)
@@ -114,19 +116,10 @@ if __name__ == "__main__":
     p.add_argument("--no-save", action="store_true")
     a = p.parse_args()
     
-    result = run(ARCHS["lstm"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
+    result = run(ARCHS["transformer"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
     if not a.no_save:
         append_result(result)
         print(f"appended to {RESULTS}")
-    result = run(ARCHS["gru"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
-    if not a.no_save:
-        append_result(result)
-        print(f"appended to {RESULTS}")
-    result = run(ARCHS["rnn"], TrainConfig(lr=a.lr, steps=a.steps, seed=a.seed))
-    if not a.no_save:
-        append_result(result)
-        print(f"appended to {RESULTS}")
-
     val = result["val_bpc"]
     print(
         f"\nbest val bpc {val:.4f}  "

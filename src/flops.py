@@ -104,6 +104,55 @@ class RecurrentConfig:
     def total_params(self):
         return self.weight_params + self.bias_params + self.embedding_params
 
+
+@dataclass(frozen=True)
+class TransformerConfig:
+    vocab: int = 205
+    n_layer: int = 4
+    d_model: int = 128
+    n_head: int = 4
+    mlp_mult: int = 4
+    batch: int = 64
+    block: int = 128
+    name: str = "transformer"
+
+    @property
+    def positions_per_step(self):
+        return self.batch * self.block
+
+    @property
+    def embedding_params(self):
+        return self.vocab * self.d_model
+
+
+    @property
+    def weight_params(self):
+        d, m = self.d_model, self.mlp_mult
+        per_layer = 4 * d * d + 2 * m * d * d
+        return per_layer * self.n_layer + d * self.vocab
+
+    @property
+    def norm_params(self):
+        return (self.n_layer * 2 + 1 ) * self.d_model
+
+    @property
+    def total_params(self):
+        return self.weight_params + self.norm_params + self.embedding_params
+
+def transformer_flops(config: TransformerConfig, training = True):
+    p, d, T = config.positions_per_step, config.d_model, config.block
+    mult = (1 + BACKWARD_MULTIPLIER) if training else 1
+    parts = {
+        "embedding": 0,
+        "qkv" : linear_flops(p, d, 3 * d, training) * config.n_layer,
+        "proj" : linear_flops(p, d, d, training) * config.n_layer,
+        "mlp" : linear_flops(p, d, d * config.mlp_mult, training) * config.n_layer + linear_flops(p, d * config.mlp_mult, d, training) * config.n_layer,
+        "attention" : config.n_layer * FLOPS_PER_MAC * mult * p * 2 * T * d,
+        "head" : linear_flops(p, d, config.vocab, training),
+    }
+    parts["total"] = sum(parts.values())
+    return parts
+
 def mlp_flops(config: MLPConfig, training = True):
     p = config.positions_per_step
     parts = {
@@ -166,6 +215,7 @@ def recurrent_flops(config: RecurrentConfig, training=True):
     return parts
 
 FLOP_FNS[RecurrentConfig] = recurrent_flops
+FLOP_FNS[TransformerConfig] = transformer_flops
 
 if __name__ == "__main__":
     cfg = MLPConfig()
